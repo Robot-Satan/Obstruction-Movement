@@ -1,0 +1,138 @@
+    public class Pathing {
+    
+      //The A* implementation isn't shown here - this is just my method for generating a grid of PathingTiles of a designated world size.
+
+      public static List<List<PathingTile>> CreateGrid(float tileSize, float moverBounds, Vector2 pointA) {
+          var tiles = new List<List<PathingTile>>();
+
+          //Start at ScreenToWorld zero
+          var bottomLeft = Camera.main.ScreenToWorldPoint(Vector2.zero);
+
+          //Calibrate so that the player's x and y are an exact point on the grid
+          var xCalibration = pointA.x;
+          var yCalibration = pointA.y;
+          if (xCalibration > bottomLeft.x) {
+              while (xCalibration > bottomLeft.x) {
+                  xCalibration -= tileSize;
+              }
+          }
+          else {
+              while (xCalibration < bottomLeft.x) {
+                  xCalibration += tileSize;
+              }
+          }
+
+          if (yCalibration > bottomLeft.y) {
+              while (yCalibration > bottomLeft.y) {
+                  yCalibration -= tileSize;
+              }
+          }
+          else {
+              while (yCalibration < bottomLeft.y) {
+                  yCalibration += tileSize;
+              }
+          }
+
+          bottomLeft = new Vector2(xCalibration, yCalibration);
+          var distanceToTopRight = Camera.main.ScreenToWorldPoint(new Vector2(Camera.main.scaledPixelWidth, Camera.main.scaledPixelHeight)) - Camera.main.ScreenToWorldPoint(Vector2.zero);
+          var topRight = bottomLeft + distanceToTopRight;
+
+          Physics2D.queriesStartInColliders = true;
+
+          int xIndex = 0;
+          int yIndex = 0;
+          //Populate the grid, populate obstructions
+          float stopWatch = Time.realtimeSinceStartup;
+          for (float x = bottomLeft.x; x < topRight.x + tileSize; x += tileSize) {
+              tiles.Add(new List<PathingTile>());
+              for (float y = bottomLeft.y; y < topRight.y + tileSize; y += tileSize) {
+                  //Create and add a tile
+                  var tile = new PathingTile(x, y, xIndex, yIndex);
+                  tile.isObstructed = false;
+
+                  //Check for an obstruction
+                  string[] strings = { "Ground", "HUD", "Ignore Raycast" };
+                  int layerMask = ~LayerMask.GetMask(strings);
+                  var hit = Physics2D.Raycast(new Vector2(x, y), Vector2.zero, 0f, layerMask);
+                  if (hit) {
+                      tile.isObstructed = true;
+                  }
+
+                  tiles[xIndex].Add(tile);
+                  yIndex++;
+              }
+              xIndex++;
+          }
+          Debug.Log("Pathing Time Analysis: Populating the grid took " + (Time.realtimeSinceStartup - stopWatch) + " seconds.");
+
+          //Assign neighbors
+          stopWatch = Time.realtimeSinceStartup;
+          for (int x = 0; x < tiles.Count; x++) {
+              for (int y = 0; y < tiles[x].Count; y++) {
+                  int left = Mathf.Max(0, x - 1);
+                  int right = Mathf.Min(tiles.Count - 1, x + 1);
+                  int below = Mathf.Max(0, y - 1);
+                  int above = Mathf.Min(tiles[x].Count - 1, y + 1);
+
+                  var neighbors = new List<PathingTile>() { tiles[left][below],
+                                                            tiles[left][y],
+                                                            tiles[left][above],
+                                                            tiles[x][below],
+                                                            tiles[x][above],
+                                                            tiles[right][below],
+                                                            tiles[right][y],
+                                                            tiles[right][above]
+                                                            };
+                  neighbors.Remove(tiles[x][y]);
+                  tiles[x][y].neighbors = neighbors.Distinct().ToList(); ;
+              }
+          }
+          Debug.Log("Pathing Time Analysis: Assigning neighbors took " + (Time.realtimeSinceStartup - stopWatch) + " seconds.");
+
+          //Un-obstruct the tiles surrounding point A (our mover)
+          stopWatch = Time.realtimeSinceStartup;
+          foreach (List<PathingTile> tileList in tiles) {
+              foreach (PathingTile tile in tileList.Where(t => (t.GetCoordinates() - pointA).magnitude <= moverBounds)) {
+                  tile.isObstructed = false;
+              }
+          }
+          Debug.Log("Pathing Time Analysis: Un-obstructing around point A took " + (Time.realtimeSinceStartup - stopWatch) + " seconds.");
+
+          //obstruct the tiles that are within moverBounds of each obstructed tile.
+          //moverBounds is the radius of the mover's collider. 
+          stopWatch = Time.realtimeSinceStartup;
+          var edgeObstructions = new List<PathingTile>();
+          //Find obstructed tiles that have unobstructed neighbors -- these are the 'edges' of each obstruction clump
+          foreach (List<PathingTile> tileList in tiles) {
+              foreach (PathingTile tile in tileList.Where(t => t.isObstructed && t.neighbors.Any(n => !n.isObstructed))) {
+                  edgeObstructions.Add(tile);
+              }
+          }
+          //But we also want the tiles within moverbounds of the edge to be obstructed
+          var bonusObstructions = new List<PathingTile>();
+          foreach (PathingTile tile in edgeObstructions) {
+              var neighbors = new List<PathingTile>();
+              neighbors.Add(tile);
+              while (neighbors.Count > 0) {
+                  //For every in range neighbor...
+                  foreach (PathingTile newNeighbor in neighbors[0].neighbors.Where(t => (tile.GetCoordinates() - t.GetCoordinates()).magnitude <= moverBounds)) {
+                      //...Skip the already-obstructed neighbors, unless they also have unobstructed neighobrs that need obstructing
+                      if (newNeighbor.isObstructed && newNeighbor.neighbors.Any(n => !n.isObstructed && (tile.GetCoordinates() - n.GetCoordinates()).magnitude <= moverBounds)) {
+                          newNeighbor.isObstructed = true;
+                          neighbors.Add(newNeighbor);
+                          continue;
+                      }
+                      else if (newNeighbor.isObstructed) {
+                          continue;
+                      }
+                      newNeighbor.isObstructed = true;
+                      neighbors.Add(newNeighbor);
+                  }
+                  neighbors.RemoveAt(0);
+              }
+          }
+          Debug.Log("Pathing Time Analysis: Obstructing extra tiles surrounding each obstructed tiles took " + (Time.realtimeSinceStartup - stopWatch) + " seconds.");
+
+          return tiles;
+      }
+    }
