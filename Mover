@@ -1,0 +1,67 @@
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
+using UnityEngine;
+using System.Linq;
+
+public class Mover: MonoBehaviour{
+  
+  //My other methods and such up here
+
+  private bool ObstructionAhead() {
+          Physics2D.queriesStartInColliders = false;
+
+          float radius = circleCollider.radius; // Find my radius
+          Vector2 center = circleCollider.transform.position; // Find my center
+          Vector2 moveDirection = GetTargetPos() - center; // Use this Vector as the angle to my target
+
+          string[] strings = {"Units", "Obstacles" }; 
+          int layerMask = LayerMask.GetMask(strings); //Only collide with objects on these layers
+
+          int numberOfRays = 10; //Arbitrary, but 10 worked well for me        
+          for (int i = -1; i < 2; i += 2) {
+              //Create a Vector perpendicular to our move direction
+              var perpendicularRadius = center + new Vector2(-moveDirection.y, moveDirection.x).normalized * radius * i;
+              UnityEngine.Debug.DrawRay(center, new Vector2(-moveDirection.y, moveDirection.x).normalized * radius * i, Color.cyan, 1.5f);
+
+              //Calculate the spacing between each ray based on the number of rays
+              var xIncrement = (perpendicularRadius.x - center.x)/ (numberOfRays);
+              var yIncrement = (perpendicularRadius.y - center.y) / (numberOfRays);
+              for (int j = 0; j < numberOfRays; j++) {
+                  //Cast a ray from a point on the perpendicular radius to the edge of my collider
+                  var origin = new Vector2(xIncrement * j, yIncrement * j) + center;
+                  var checkRange = HeightFromDiameter(radius, center, origin);
+                  var hit = Physics2D.Raycast(origin, moveDirection, checkRange, layerMask);
+
+                  if (hit) {
+                      UnityEngine.Debug.Log(name + " checked ahead -- we will hit " + hit.collider.gameObject.name + " on layer" + hit.collider.gameObject.layer + "!");                    
+                      //If we will collide with something, I have the unit move away from the obstruction along that perpendicular that we just drew
+
+                      //Check which direction is further from the obstruction
+                      var orthogonals = new Vector2[] { center + new Vector2(-moveDirection.y, moveDirection.x).normalized * GetMoveSpeed() * Time.deltaTime * -1,
+                                                        center + new Vector2(-moveDirection.y, moveDirection.x).normalized * GetMoveSpeed() * Time.deltaTime * 1,
+                                                       };
+
+                      Vector2 obstructionPos = hit.collider.transform.position;
+
+                      //Using my movement function to tell the Mover to move toward whichever direction is furthest from the obstacle
+                      MoveTowardCustom(orthogonals.OrderByDescending(o => (obstructionPos - o).magnitude).First(), 0.5f);                    
+                      UnityEngine.Debug.DrawRay(origin, moveDirection.normalized * checkRange, Color.magenta, 1.5f);
+
+                      return true;
+                  }
+
+                  UnityEngine.Debug.DrawRay(origin, moveDirection.normalized * checkRange, Color.white, 1.5f);
+              }
+          }
+          UnityEngine.Debug.Log(name + " checked ahead -- we will hit nothing!");
+          return false;
+      }
+      
+      /// Given the center of a circle and its radius, returns the length of the segment from pointInquestion to the edge of the circle, perpendicular to the diameter passing through pointInQuestion
+      private float HeightFromDiameter(float radius, Vector2 center, Vector2 pointInQuestion) {
+          float fractionOfRadius = (center - pointInQuestion).magnitude / radius;
+          return radius * Mathf.Sqrt(1 - (fractionOfRadius * fractionOfRadius));
+      }
+
+    }
